@@ -31,31 +31,42 @@ public class TicketServiceImpl implements TicketService {
 
     @Override
     public TicketDto bookOneTicket(BookTicketRequest bookTicketRequest) throws NotFoundFilmException, OccupiedOrNotExistSeat {
-        Movie movieFromRepository = movieRepository.findById(bookTicketRequest.getMovieId()).orElseThrow(() -> new NotFoundFilmException(bookTicketRequest.getMovieId()));
-        Ticket ticketFromFilter = movieFromRepository
+        Movie movieFromRepository = getMovieFromRepository(bookTicketRequest.getMovieId());
+        Ticket ticket = getTicket(bookTicketRequest, movieFromRepository);
+        movieFromRepository.getTickets().remove(ticket);
+        movieRepository.save(movieFromRepository);
+        markTicketAsSoledAndAddToArchive(ticket);
+        return ticketMapper.mapTicketToTicketDto(ticket);
+    }
+
+    private void markTicketAsSoledAndAddToArchive(Ticket ticket) {
+        SoldTicket soldTicket = ticketMapper.mapTicketToSoldTicket(ticket);
+        soldTicketRepository.save(soldTicket);
+    }
+
+    private Ticket getTicket(BookTicketRequest bookTicketRequest, Movie movieFromRepository) throws OccupiedOrNotExistSeat {
+        return movieFromRepository
                 .getTickets().stream().filter((ticket -> bookTicketRequest.getSeatId().equals(ticket.getSeatNumber()))).findFirst()
                 .orElseThrow(() -> new OccupiedOrNotExistSeat(bookTicketRequest.getMovieId()));
-        movieFromRepository.getTickets().remove(ticketFromFilter);
-        movieRepository.save(movieFromRepository);
-
-        SoldTicket soldTicket = ticketMapper.mapTicketToSoldTicket(ticketFromFilter);
-        soldTicketRepository.save(soldTicket);
-        return ticketMapper.mapTicketToTicketDto(ticketFromFilter);
     }
 
     @Override
     public TicketDto bookOneTicketWithDiscount(BookTicketWithDiscountRequest bookTicketWithDiscountRequest) throws NotFoundFilmException, OccupiedOrNotExistSeat {
-        Movie movieFromRepository = movieRepository.findById(bookTicketWithDiscountRequest.getMovieId()).orElseThrow(() -> new NotFoundFilmException(bookTicketWithDiscountRequest.getMovieId()));
-        Ticket ticketFromFilter = movieFromRepository.getTickets().stream().filter((ticket -> bookTicketWithDiscountRequest.getSeatId().equals(ticket.getSeatNumber()))).findFirst()
-                .orElseThrow(() -> new OccupiedOrNotExistSeat(bookTicketWithDiscountRequest.getMovieId()));
-        movieFromRepository.getTickets().remove(ticketFromFilter);
-        BigDecimal ticketPriceBeforeDiscount = ticketFromFilter.getTicketPrice();
-        ticketFromFilter.setTicketPrice(calculatePercentage(bookTicketWithDiscountRequest.getDiscountInPercentage(), ticketPriceBeforeDiscount));
+        Movie movieFromRepository = getMovieFromRepository(bookTicketWithDiscountRequest.getMovieId());
+        Ticket ticket = getTicket(bookTicketWithDiscountRequest, movieFromRepository);
+        movieFromRepository.getTickets().remove(ticket);
+        BigDecimal ticketPriceBeforeDiscount = ticket.getTicketPrice();
+        ticket.setTicketPrice(calculatePercentage(bookTicketWithDiscountRequest.getDiscountInPercentage(), ticketPriceBeforeDiscount));
         movieRepository.save(movieFromRepository);
-        SoldTicket soldTicket = ticketMapper.mapTicketToSoldTicket(ticketFromFilter);
+        SoldTicket soldTicket = ticketMapper.mapTicketToSoldTicket(ticket);
         soldTicket.setDiscount(bookTicketWithDiscountRequest.getDiscountInPercentage());
         soldTicketRepository.save(soldTicket);
-        return ticketMapper.mapTicketToTicketDto(ticketFromFilter);
+        return ticketMapper.mapTicketToTicketDto(ticket);
+    }
+
+    private Ticket getTicket(BookTicketWithDiscountRequest bookTicketWithDiscountRequest, Movie movieFromRepository) throws OccupiedOrNotExistSeat {
+        return movieFromRepository.getTickets().stream().filter((ticket -> bookTicketWithDiscountRequest.getSeatId().equals(ticket.getSeatNumber()))).findFirst()
+                .orElseThrow(() -> new OccupiedOrNotExistSeat(bookTicketWithDiscountRequest.getMovieId()));
     }
 
     @Override
@@ -66,7 +77,7 @@ public class TicketServiceImpl implements TicketService {
 
     @Override
     public List<TicketDto> bookTicketsWithSameRow(BookTicketsWithSameRow bookTicketsWithSameRow) throws NotFoundFilmException {
-        Movie movieFromRepository = movieRepository.findById(bookTicketsWithSameRow.getMovieId()).orElseThrow(() -> new NotFoundFilmException(bookTicketsWithSameRow.getMovieId()));
+        Movie movieFromRepository = getMovieFromRepository(bookTicketsWithSameRow.getMovieId());
         List<Ticket> temp = new ArrayList<Ticket>();
         for (int i = 0; i <  movieFromRepository.getTickets().size(); i++) {
             for (int j = i; j <= movieFromRepository.getTickets().size(); j++) {
@@ -92,11 +103,12 @@ public class TicketServiceImpl implements TicketService {
         return ticketMapper.mapListSoldTicketToListSoldTicketDto(soldTicketsFromRepo);
     }
 
+    private Movie getMovieFromRepository(Long movieId) throws NotFoundFilmException {
+        return movieRepository.findById(movieId).orElseThrow(() -> new NotFoundFilmException(movieId));
+    }
+
     private BigDecimal calculatePercentage(int discountInPercentage, BigDecimal currentPrice) {
-        BigDecimal discountInPerc = new BigDecimal(discountInPercentage);
-        BigDecimal oneHunred = new BigDecimal(100);
-        BigDecimal division = discountInPerc.divide(oneHunred, 2, RoundingMode.CEILING);
-        BigDecimal finalDiscount = division.multiply(currentPrice);
+        BigDecimal finalDiscount =  new BigDecimal(discountInPercentage).divide(new BigDecimal(100), 2, RoundingMode.CEILING).multiply(currentPrice);
         return currentPrice.subtract(finalDiscount);
     }
 }
